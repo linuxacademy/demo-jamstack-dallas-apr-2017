@@ -1,0 +1,17 @@
+{
+  "name": "generate-presentation",
+  "version": "1.0.0",
+  "description": "Lambda handler to generate presentation from files",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Hal Massey",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "aws-sdk": "^2.39.0",
+    "eslint": "^3.19.0",
+    "eslint-config-airbnb-base": "^11.1.3",
+    "eslint-plugin-import": "^2.2.0"
+  }
+}

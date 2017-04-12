@@ -1,0 +1,17 @@
+{
+  "name": "search",
+  "version": "1.0.0",
+  "description": "Slide search service",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Hal Massey",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "fuse.js": "^2.6.2"
+  },
+  "devDependencies": {
+    "aws-sdk": "^2.41.0"
+  }
+}

@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create a Serverless stack with CloudFormation using Serverless Application Model
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  DistributionPriceClass:
+    Type: String
+    Default: PriceClass_100
+    AllowedValues:
+      - PriceClass_100
+      - PriceClass_200
+      - PriceClass_All
+    Description: Price class to use with CloudFront distribution
+  PresentationBucketName:
+    Type: String
+    Default: ""
+    Description: Name to give bucket for generated presentation
+  SiteURL:
+    Type: String
+    Default: ""
+    Description: Custom domain where presentation will be hosted
+  SSLCertARN:
+    Type: String
+    Default: ""
+    Description: ARN of SSL Certificate from ACM
+  SourceBucketName:
+    Type: String
+    Default: ""
+    Description: Name to give bucket for slide source
+Conditions:
+  PresentationBucketSet: !Equals [ !Ref PresentationBucketName, "" ]
+  SourceBucketSet: !Equals [ !Ref SourceBucketName, "" ]
+  SSL: !Equals [ !Ref SSLCertARN, "" ]
+  URLSet: !Equals [ !Ref SiteURL, "" ]
+Resources:
+  GenerationRole:
+    Type: AWS::IAM::Role
+    Description: Role to attach to our S3 lambda function
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Policies:
+        -
+          PolicyName: PresentationGeneratorPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${PresentationBucket}
+              -
+                Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:PutObject*
+                  - s3:DeleteObject*
+                Resource: !Sub arn:aws:s3:::${PresentationBucket}/*
+              -
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                Resource: "*"
+  SearchRole:
+    Type: AWS::IAM::Role
+    Description: Role to attach to our search lambda function
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Policies:
+        -
+          PolicyName: SearchSlidesPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - cloudformation:Describe*
+                Resource: !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+  PresentationBucket:
+    Type: AWS::S3::Bucket
+    Description: Bucket for storing the generated presentation files
+    Properties:
+      AccessControl: PublicRead
+      BucketName: !If
+        - PresentationBucketSet
+        - Ref: AWS::NoValue
+        - Ref: PresentationBucketName
+      VersioningConfiguration:
+        Status: Enabled
+      WebsiteConfiguration:
+        IndexDocument: index.html
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Description: Bucket for storing slide sources
+    Properties:
+      BucketName: !If
+        - SourceBucketSet
+        - Ref: AWS::NoValue
+        - Ref: SourceBucketName
+  SourceBucketPolicy:
+    Type: AWS::IAM::Policy
+    Description: Once created, we need to allow the function access to the slide bucket
+    Properties:
+      Roles:
+        - Ref: GenerationRole
+      PolicyName: GeneratorSourceAccessPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !Sub arn:aws:s3:::${SourceBucket}
+          -
+            Effect: Allow
+            Action:
+              - s3:GetObject*
+              - s3:PutObject*
+              - s3:DeleteObject*
+            Resource: !Sub arn:aws:s3:::${SourceBucket}/*
+  SourceBucketSearchPolicy:
+    Type: AWS::IAM::Policy
+    Description: Once created, we need to allow the search function access to the slide bucket
+    Properties:
+      Roles:
+        - Ref: SearchRole
+      PolicyName: SearchSourceAccessPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !Sub arn:aws:s3:::${SourceBucket}
+          -
+            Effect: Allow
+            Action:
+              - s3:GetObject*
+            Resource: !Sub arn:aws:s3:::${SourceBucket}/*
+  GeneratePresentationFunction:
+    Type: AWS::Serverless::Function
+    Description: Regenerate presentation whenever slide files are updated
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs6.10
+      Timeout: 300
+      CodeUri: ./build/handlers/generate
+      Role: !GetAtt [ GenerationRole, Arn ]
+      Environment:
+        Variables:
+          CLOUDFRONT_DISTRIBUTION: !Ref PresentationDistribution
+          PRESENTATION_BUCKET: !Ref PresentationBucket
+      Events:
+        SourceUpdate:
+          Type: S3
+          Properties:
+            Bucket: !Ref SourceBucket
+            Events:
+              - s3:ObjectCreated:*
+              - s3:ObjectRemoved:*
+  SearchApi:
+    Type: AWS::Serverless::Api
+    Description: Slide search API
+    Properties:
+      StageName: prod
+      DefinitionBody:
+        swagger: 2.0
+        info:
+          title:
+            Ref: AWS::StackName
+        paths:
+          "/search":
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SearchPresentationFunction.Arn}/invocations
+              responses: {}
+  SearchPresentationFunction:
+    Type: AWS::Serverless::Function
+    Description: Search presentation slides
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs6.10
+      Timeout: 300
+      CodeUri: ./build/handlers/search
+      Role: !GetAtt [ SearchRole, Arn ]
+      Environment:
+        Variables:
+          CLOUDFORMATION_STACK: !Ref AWS::StackName
+      Events:
+        GetSearch:
+          Type: Api
+          Properties:
+            Path: /search
+            Method: get
+            RestApiId: !Ref SearchApi
+  PresentationDistribution:
+    Type: AWS::CloudFront::Distribution
+    Description: CloudFront distribution for presentation
+    Properties:
+    DependsOn:
+      - PresentationBucket
+    Properties:
+      DistributionConfig:
+        Aliases: !If
+          - URLSet
+          - Ref: AWS::NoValue
+          - [ !Ref SiteURL ]
+        CacheBehaviors:
+          -
+            ForwardedValues:
+              Cookies:
+                Forward: none
+              Headers: []
+              QueryString: true
+            PathPattern: /search
+            TargetOriginId: search
+            ViewerProtocolPolicy: allow-all
+        DefaultCacheBehavior:
+          ForwardedValues:
+            QueryString: true
+          TargetOriginId: main
+          ViewerProtocolPolicy: allow-all
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: http2
+        Origins:
+          -
+            Id: main
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+            DomainName: !Sub ${PresentationBucket}.s3-website-${AWS::Region}.amazonaws.com
+          -
+            Id: search
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+            DomainName: !Sub ${SearchApi}.execute-api.${AWS::Region}.amazonaws.com
+            OriginPath: /prod
+        PriceClass: !Ref DistributionPriceClass
+        ViewerCertificate: !If
+          - SSL
+          - Ref: AWS::NoValue
+          -
+            AcmCertificateArn: !Ref SSLCertARN
+            SslSupportMethod: sni-only
+Outputs:
+  SourceBucket:
+    Description: Bucket slide sources are stored in for this stack
+    Value: !Ref SourceBucket

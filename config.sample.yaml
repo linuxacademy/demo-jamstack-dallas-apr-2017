@@ -1,0 +1,11 @@
+AWS:
+  CloudFormation:
+    stackName: (Name for the stack generated on deploy)
+  CloudFront:
+    sslCertArn: (ARN for the Certificate Manager certificate for HTTPS service)
+  S3:
+    packageBucket: (Bucket where handler code is stored)
+    presentationBucket: (Bucket where generated site code will be stored)
+    slideBucket: (Bucket where slide sources will be stored)
+Site:
+  URL: (Site domain)

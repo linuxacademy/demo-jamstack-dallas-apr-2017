@@ -1,0 +1,33 @@
+<h4>Slide searcher</h4>
+<p><input style='background: none; font-family: "Source Sans Pro", Helvetica, sans-serif; border-width: 0 0 1px 0; border-color: gray; font-size: 1.2em; text-align: center; color: #fff;' id="search-input" type="text" /></p>
+<ul style="list-style-type: none; margin-left: 0;" id="search-output"></ul>
+
+<script type="application/javascript">
+window.addEventListener('load', ev => {
+  const onReady = () => {
+    const getSearch = _.debounce(
+      ev => fetch(`/search?q=${encodeURIComponent(ev.target.value)}`)
+      .then(response => response.json())
+      .then(json => {
+        const output = document.getElementById('search-output');
+        Array.from(output.children).forEach(child => child.remove());
+        json.slice(0, 5).forEach(result => {
+          const li = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = `#/${result}`;
+          a.appendChild(document.createTextNode(result));
+          li.appendChild(a);
+          output.appendChild(li);
+        });
+      })
+    );
+
+    const input = document.getElementById('search-input');
+    console.log(input);
+    if (input) {
+      document.getElementById('search-input').addEventListener('input', getSearch);
+    }
+  };
+  Reveal.isReady() ? onReady() : Reveal.addEventListener('ready', onReady);
+});
+</script>
